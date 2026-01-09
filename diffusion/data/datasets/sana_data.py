@@ -33,7 +33,7 @@ from diffusion.data.wids import ShardListDataset, ShardListDatasetMulti, lru_jso
 from diffusion.utils.logger import get_root_logger
 
 
-@DATASETS.register_module()
+# @DATASETS.register_module()
 class SanaImgDataset(Dataset):
     def __init__(
         self,
@@ -218,7 +218,7 @@ class SanaImgDataset(Dataset):
         return sampled_label, original_weight
 
 
-@DATASETS.register_module()
+# @DATASETS.register_module()
 class SanaWebDataset(Dataset):
     def __init__(
         self,
@@ -477,11 +477,12 @@ if __name__ == "__main__":
     image_size = 1024  # 256
     transform = get_transform("default_train", image_size)
     train_dataset = SanaWebDataset(
-        data_dir="debug_data_train/vaef32c32/debug_data",
+        # data_dir="debug_data_train/vaef32c32/debug_data",
+        data_dir="/home/hpc/vlgm/vlgm116v/MatGen/Sana/data/jetadata",
         resolution=image_size,
         transform=transform,
         max_length=300,
-        load_vae_feat=True,
+        load_vae_feat=False,
         num_replicas=1,
     )
     dataloader = DataLoader(train_dataset, batch_size=32, shuffle=False, num_workers=4)

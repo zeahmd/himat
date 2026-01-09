@@ -111,6 +111,8 @@ class SanaPipeline(nn.Module):
 
         # 1. build vae and text encoder
         self.vae = self.build_vae(config.vae)
+        # print("After building VAE:")
+        # print(self.vae)
         self.tokenizer, self.text_encoder = self.build_text_encoder(config.text_encoder)
 
         # 2. build Sana model
@@ -300,8 +302,10 @@ class SanaPipeline(nn.Module):
             with torch.no_grad():
                 sample = vae_decode(self.config.vae.vae_type, self.vae, sample)
 
+            print("Decoded sample shape:", sample.shape)
             if use_resolution_binning:
                 sample = resize_and_crop_tensor(sample, self.ori_width, self.ori_height)
+            print("Resized sample shape:", sample.shape)
             samples.append(sample)
 
             return sample

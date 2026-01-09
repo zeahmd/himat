@@ -35,7 +35,7 @@ from diffusion.data.transforms import get_closest_ratio
 from diffusion.data.wids import lru_json_load
 
 
-@DATASETS.register_module()
+# @DATASETS.register_module()
 class SanaWebDatasetMS(SanaWebDataset):
     def __init__(
         self,
@@ -227,7 +227,7 @@ class SanaWebDatasetMS(SanaWebDataset):
         return len(self.dataset)
 
 
-@DATASETS.register_module()
+# @DATASETS.register_module()
 class DummyDatasetMS(SanaWebDatasetMS):
     def __init__(self, **kwargs):
         self.base_size = kwargs["resolution"]
@@ -274,11 +274,22 @@ if __name__ == "__main__":
 
     image_size = 256
     transform = get_transform("default_train", image_size)
-    data_dir = ["data/debug_data_train/debug_data"]
+    # data_dir = ["data/debug_data_train/debug_data"]
+    # data_dir = ["/home/hpc/vlgm/vlgm116v/MatGen/Sana/data/retadata"]
+    data_dir = ["/home/woody/vlgm/vlgm116v/retadata"]
     for data_path in data_dir:
-        train_dataset = SanaWebDatasetMS(data_dir=data_path, resolution=image_size, transform=transform, max_length=300)
+        train_dataset = SanaWebDatasetMS(
+            data_dir=data_path,
+            resolution=image_size,
+            transform=transform,
+            max_length=300,
+            num_replicas=1,
+            aspect_ratio_type=str(ASPECT_RATIO_1024),
+            load_vae_feat=False,
+        )
         dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False, num_workers=4)
 
         for data in tqdm(dataloader):
+            print(data)
             break
-        print(dataloader.dataset.index_info)
+        # print(dataloader.dataset.index_info)
