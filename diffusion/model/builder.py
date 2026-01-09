@@ -72,7 +72,8 @@ def get_tokenizer_and_text_encoder(name="T5", device="cuda"):
         "gemma-2b": "google/gemma-2b",
         "gemma-2b-it": "google/gemma-2b-it",
         "gemma-2-2b": "google/gemma-2-2b",
-        "gemma-2-2b-it": "Efficient-Large-Model/gemma-2-2b-it",
+        # "gemma-2-2b-it": "Efficient-Large-Model/gemma-2-2b-it",
+        "gemma-2-2b-it": "/home/hpc/vlgm/vlgm116v/.cache/huggingface/hub/models--Efficient-Large-Model--gemma-2-2b-it/snapshots/569d9809d0c8b6722d4d31b5a77a2ec7a400650a",
         "gemma-2-9b": "google/gemma-2-9b",
         "gemma-2-9b-it": "google/gemma-2-9b-it",
         "Qwen2-5-VL-3B-Instruct": "Qwen/Qwen2.5-VL-3B-Instruct",
@@ -154,6 +155,7 @@ def get_vae(name, model_path, device="cuda", dtype=None, config=None):
     elif "AutoencoderDC" in name:
         print(colored(f"[AutoencoderDC] Loading model from {model_path}", attrs=["bold"]))
         dc_ae = AutoencoderDC.from_pretrained(model_path).to(device).eval()
+        # print(dc_ae)
         return dc_ae.to(dtype)
     elif "WanVAE" in name:
         assert config is not None, "config.vae is required for WanVAE"
@@ -325,9 +327,13 @@ def vae_decode(name, vae, latent):
         samples = ae.decode(latent)
     elif "AutoencoderDC" in name:
         ae = vae
+        # print("Inside vae_decode AutoencoderDC: ")
+        # print(ae)
         scaling_factor = ae.config.scaling_factor if ae.config.scaling_factor else 0.41407
         try:
             samples = ae.decode(latent / scaling_factor, return_dict=False)[0]
+            # print("Inside vae_decode: ")
+            # print(samples.shape)
         except torch.cuda.OutOfMemoryError as e:
             print("Warning: Ran out of memory when regular VAE decoding, retrying with tiled VAE decoding.")
             ae.enable_tiling(tile_sample_min_height=1024, tile_sample_min_width=1024)

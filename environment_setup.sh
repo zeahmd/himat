@@ -22,7 +22,7 @@ else
 fi
 
 # init a raw torch to avoid installation errors.
-# pip install torch
+pip install torch
 
 # update pip to latest version for pyproject.toml setup.
 pip install -U pip
@@ -33,7 +33,8 @@ pip install -U xformers==0.0.32.post2 --index-url https://download.pytorch.org/w
 # install sana
 pip install -e .
 
-pip install flash-attn==2.8.2 --no-build-isolation
+# pip install -v flash-attn==2.8.2 --no-build-isolation
+MAX_JOBS=4 pip -v install flash-attn==2.8.2 --no-build-isolation # --no-cache-dir
 
 # install torchprofile
 # pip install git+https://github.com/zhijian-liu/torchprofile

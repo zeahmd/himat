@@ -1,5 +1,6 @@
 data:
-  data_dir: [data/toy_data]
+  # data_dir: [data/toy_data]
+  data_dir: [/home/woody/vlgm/vlgm116v/retadata]
   image_size: 1024
   caption_proportion:
     prompt: 1
@@ -19,7 +20,8 @@ model:
   image_size: 1024
   mixed_precision: bf16
   fp32_attention: true
-  load_from: hf://Efficient-Large-Model/SANA1.5_1.6B_1024px/checkpoints/SANA1.5_1.6B_1024px.pth
+  # load_from: hf://Efficient-Large-Model/SANA1.5_1.6B_1024px/checkpoints/SANA1.5_1.6B_1024px.pth
+  load_from: /home/hpc/vlgm/vlgm116v/.cache/huggingface/hub/models--Efficient-Large-Model--SANA1.5_1.6B_1024px/snapshots/a7b7e39161522e12d98045d2c1b5da5101d712f8/checkpoints/SANA1.5_1.6B_1024px.pth
   resume_from:
   aspect_ratio_type: ASPECT_RATIO_1024
   multi_scale: true
@@ -37,7 +39,8 @@ model:
 # VAE setting
 vae:
   vae_type: AutoencoderDC
-  vae_pretrained: mit-han-lab/dc-ae-f32c32-sana-1.1-diffusers
+  # vae_pretrained: mit-han-lab/dc-ae-f32c32-sana-1.1-diffusers
+  vae_pretrained: /home/hpc/vlgm/vlgm116v/.cache/huggingface/hub/models--mit-han-lab--dc-ae-f32c32-sana-1.1-diffusers/snapshots/6f7b3f3b289a439a11ef4fb1034989fd4b9a4766
   scale_factor: 0.41407
   vae_latent_dim: 32
   vae_downsample_rate: 32
