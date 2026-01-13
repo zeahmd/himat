@@ -27,6 +27,7 @@ python tools/create_wids_metadata.py /path/to/tar/dir > /path/to/wids-meta.json
 """
 
 d = sys.argv[1]
+# d = "/home/woody/vlgm/vlgm116v/matsynth/data"
 
 
 def process(t):

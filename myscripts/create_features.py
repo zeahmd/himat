@@ -10,15 +10,35 @@ from diffusion.data.datasets.utils import ASPECT_RATIO_2048, ASPECT_RATIO_2880, 
 from diffusion.data.transforms import get_closest_ratio
 
 import io
+import re
+import sys
 import time
 import json
 import tarfile
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from glob import glob
 from PIL import Image
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def normalize_material_name(name):
+    """
+    Normalize material names for matching.
+    MatSynth: 'cgbc_granite_008_large' -> 'granite_8_large'
+    Captions: 'Granite 08 Large' -> 'granite_8_large'
+    """
+    # Remove common prefixes
+    name = re.sub(r'^(cgbc_|acg_|js_|\d{4}_)', '', name)
+    # Convert to lowercase
+    name = name.lower()
+    # Replace spaces with underscores
+    name = name.replace(' ', '_')
+    # Remove leading zeros from numbers (008 -> 8, 08 -> 8)
+    name = re.sub(r'0+(\d+)', r'\1', name)
+    return name
 
 
 def load_tar_file(tar_filename):
@@ -39,19 +59,29 @@ def load_tar_file(tar_filename):
 
 def load_matsynth_and_save_tar(filename, config):
     df = pd.read_parquet(filename)
-    df['caption'] = df['metadata'].apply(lambda x: x['gemini2.5_basecolor_tags_desc'])
-    df = df[['name', 'basecolor', 'normal', 'roughness', 'metallic', 'height', 'caption']]
+    # df['caption'] = df['metadata'].apply(lambda x: x['gemini2.5_basecolor_tags_desc'])
+    df = df[['name', 'basecolor', 'normal', 'roughness', 'metallic', 'height']] # , 'caption']]
+    df['name'] = df['name'].apply(normalize_material_name)
+    caption_dict = json.load(open('/home/woody/vlgm/vlgm116v/matsynth/matsynth_captions.json', 'r'))
+    caption_dict = {normalize_material_name(k): v for k, v in caption_dict.items()}
 
     feat_list = []
     caption_list = []
     for idx in range(len(df)):
+        try:
+            caption = caption_dict[df.loc[idx, 'name']]['caption']
+        except KeyError:
+            # don't process maps if caption not found
+            matsynth_stats['num_materials_removed'] += 1
+            continue
+
         basecolor = preprocess_img(Image.open(io.BytesIO(df.loc[idx, 'basecolor']['bytes'])))
         normal = preprocess_img(Image.open(io.BytesIO(df.loc[idx, 'normal']['bytes'])))
         roughness = preprocess_img(Image.open(io.BytesIO(df.loc[idx, 'roughness']['bytes'])))
         metallic = preprocess_img(Image.open(io.BytesIO(df.loc[idx, 'metallic']['bytes'])))
         height = preprocess_img(Image.open(io.BytesIO(df.loc[idx, 'height']['bytes'])))
         rmh = torch.cat([roughness, metallic, height], dim=0)
-        caption = [df.loc[idx, 'caption']]
+        # caption = [df.loc[idx, 'caption']]
 
         basecolor = basecolor[None, ...]
         normal = normal[None, ...]
@@ -63,15 +93,25 @@ def load_matsynth_and_save_tar(filename, config):
 
         feat_list.append(z)
         caption_list.append(caption)
-        print(f"Processed {df.loc[idx, 'name']} with caption: {caption[0]}")
-        break
+        # print(f"Processed {df.loc[idx, 'name']} with caption: {caption[0]}")
+
+    # sanity checks
+    if len(feat_list) != len(caption_list):
+        matsynth_stats['num_parquet_files_removed'] += 1
+        print(f"len(feat_list) != len(caption_list), filename: {filename} not saved.")
+        return
+    if len(feat_list) == 0 or len(caption_list) == 0:
+        matsynth_stats['num_parquet_files_removed'] += 1
+        print(f"len(feat_list) == 0 or len(caption_list) == 0, filename: {filename} not saved.")
+        return
 
     # save to tar file
     with tarfile.open(filename.replace('.parquet', '.tar'), 'w') as tar:
         for i in range(len(feat_list)):
             name = df.loc[i, 'name']
             feat_np = feat_list[i]
-            caption = caption_list[i][0]
+            # caption = caption_list[i][0]
+            caption = caption_list[i]
             # save numpy array to bytes
             np_bytes = io.BytesIO()
             np.save(np_bytes, feat_np)
@@ -95,7 +135,7 @@ def load_matsynth_and_save_tar(filename, config):
             json_info.size = len(json_bytes.getbuffer())
             tar.addfile(tarinfo=json_info, fileobj=json_bytes)
 
-    print(f"Saved features and captions to {filename.replace('.parquet', '.tar')}")
+    # print(f"Saved features and captions to {filename.replace('.parquet', '.tar')}")
 
     ###################### TEST PROCESSING SPEED AND EQUALITY ######################
     # now = time.time()
@@ -245,11 +285,23 @@ def main(cfg):
     # print("Text features shape:", text_feat.shape)
     # print("Text mask shape:", text_mask.shape)
 
+    global matsynth_stats
+    matsynth_stats = {
+        'num_materials_removed': 0,
+        'num_parquet_files_removed': 0,
+    }
     # load data here
-    parquet_files = glob("/home/woody/vlgm/vlgm116v/matsynth/*.parquet")
-    for pf in parquet_files:
-        print(f"Processing file: {pf}")
+    parquet_files = glob(f"{sys.argv[1]}/*.parquet")
+    # parquet_files = glob(f"/home/woody/vlgm/vlgm116v/matsynth/*.parquet")
+    already_created = glob(f"{sys.argv[1]}/*.tar")
+    parquet_files = [
+        pf for pf in parquet_files if pf.replace('.parquet', '.tar') not in already_created
+    ]
+    print(f"Found {len(parquet_files)} parquet files.")
+    for pf in tqdm(parquet_files):
+        # print(f"Processing file: {pf}")
         load_matsynth_and_save_tar(pf, config)
+    print("Matsynth processing stats: ", matsynth_stats)
 
 
 if __name__ == "__main__":
