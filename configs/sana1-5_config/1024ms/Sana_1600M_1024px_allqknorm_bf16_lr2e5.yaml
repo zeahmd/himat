@@ -1,6 +1,7 @@
 data:
+  # data_dir: [data/matsynth]
+  data_dir: [/home/woody/vlgm/vlgm116v/matsynth/data]
   # data_dir: [data/toy_data]
-  data_dir: [/home/woody/vlgm/vlgm116v/retadata]
   image_size: 1024
   caption_proportion:
     prompt: 1
@@ -76,8 +77,8 @@ scheduler:
 train:
   num_workers: 10
   seed: 1
-  train_batch_size: 2
-  num_epochs: 100
+  train_batch_size: 1
+  num_epochs: 1000
   gradient_accumulation_steps: 1
   grad_checkpointing: true
   gradient_clip: 0.1
@@ -104,7 +105,8 @@ train:
   log_interval: 20
   save_model_epochs: 5
   save_model_steps: 500
-  work_dir: output/debug
+  # save_model_steps: 10
+  work_dir: /home/woody/vlgm/vlgm116v/output/debug
   online_metric: false
   eval_metric_step: 2000
   online_metric_dir: metric_helper
