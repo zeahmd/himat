@@ -452,6 +452,7 @@ def model_wrapper(
             noise = noise_pred_fn(x, t_continuous)
             return noise - guidance_scale * expand_dims(sigma_t, x.dim()) * cond_grad
         elif guidance_tp == "classifier-free":
+            # print("Inside classifier-free guidance, x.shape:", x.shape)
             if (
                 guidance_scale == 1.0
                 or unconditional_condition is None
@@ -459,7 +460,9 @@ def model_wrapper(
             ):
                 return noise_pred_fn(x, t_continuous, cond=condition)
             else:
+                # print("Inside classifier-free guidance with guidance_scale != 1.0, x.shape:", x.shape)
                 x_in = torch.cat([x] * 2)
+                # print("Inside classifier-free guidance, x_in.shape:", x_in.shape)
                 t_in = torch.cat([t_continuous] * 2)
                 if condition_as_list:
                     # for Wan, the context is list
