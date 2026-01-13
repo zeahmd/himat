@@ -55,6 +55,25 @@ from diffusion.utils.optimizer import auto_scale_lr, build_optimizer
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
+def squeeze_batch(batch):
+    batch[0] = batch[0].squeeze(0)
+    batch[1] = tuple(x[0] for x in batch[1])
+    batch[2] = batch[2].squeeze(0)
+    batch[3] = {
+        "img_hw": batch[3]["img_hw"].squeeze(0),
+        "aspect_ratio": torch.tensor([x for x in batch[3]["aspect_ratio"]], device=batch[0].device),
+    }
+    batch[4] = torch.tensor([x for x in batch[4]], device=batch[0].device)
+    batch[5] = tuple(x[0] for x in batch[5])
+    batch[6] = {
+        'key': [x for x in batch[6]['key']],
+        'index': torch.tensor([x for x in batch[6]['index']], device=batch[0].device),
+        'shard': [x for x in batch[6]['shard']],
+        'shardindex': torch.tensor([x for x in batch[6]['shardindex']], device=batch[0].device),
+    }
+    return batch
+
+
 def set_fsdp_env():
     # Basic FSDP settings
     os.environ["ACCELERATE_USE_FSDP"] = "true"
@@ -123,6 +142,7 @@ def log_validation(accelerator, config, model, logger, step, device, vae=None, i
             caption_embs, emb_masks = embed["caption_embeds"].to(device), embed["emb_mask"].to(device)
             model_kwargs = dict(data_info={"img_hw": hw, "aspect_ratio": ar}, mask=emb_masks)
 
+            print("z.shape: ", z.shape)
             if sampler == "dpm-solver":
                 dpm_solver = DPMS(
                     model.forward_with_dpmsolver,
@@ -161,6 +181,7 @@ def log_validation(accelerator, config, model, logger, step, device, vae=None, i
                     method="multistep",
                     flow_shift=config.scheduler.flow_shift,
                 )
+                print("denoised.shape: ", denoised.shape)
             else:
                 raise ValueError(f"{sampler} not implemented")
 
@@ -325,10 +346,19 @@ def train(
         model_time_all = 0
         for step, batch in enumerate(train_dataloader):
             # image, json_info, key = batch
+            batch = squeeze_batch(batch)
+            # print("batch[0].shape: ", batch[0].shape)
+            # print("batch[1]: ", batch[1])
+            # print("batch[2].shape: ", batch[2].shape)
+            # print("batch[3]: ", batch[3])
+            # print("batch[4]: ", batch[4])
+            # print("batch[5]: ", batch[5])
+            # print("batch[6]: ", batch[6])
             accelerator.wait_for_everyone()
             data_time_all += time.time() - data_time_start
             vae_time_start = time.time()
             if load_vae_feat:
+                # TODO: remove first dimension 
                 z = batch[0].to(accelerator.device)
             else:
                 with torch.no_grad():
@@ -366,6 +396,7 @@ def train(
                             max_length_all = (
                                 num_sys_prompt_tokens + config.text_encoder.model_max_length - 2
                             )  # magic number 2: [bos], [_]
+                        # print("len(prompt): ", len(prompt))
                         txt_tokens = tokenizer(
                             prompt,
                             padding="max_length",
@@ -376,9 +407,11 @@ def train(
                         select_index = [0] + list(
                             range(-config.text_encoder.model_max_length + 1, 0)
                         )  # first bos and end N-1
+                        # print("txt_tokens.input_ids.shape: ", txt_tokens.input_ids.shape)
                         y = text_encoder(txt_tokens.input_ids, attention_mask=txt_tokens.attention_mask)[0][:, None][
                             :, :, select_index
                         ]
+                        # print("y.shape: ", y.shape)
                         y_mask = txt_tokens.attention_mask[:, None, None][:, :, :, select_index]
                 else:
                     print("error")
@@ -406,6 +439,7 @@ def train(
             with accelerator.accumulate(model):
                 # Predict the noise residual
                 optimizer.zero_grad()
+                # print(f"clean_images.shape: {clean_images.shape}")
                 loss_term = train_diffusion.training_losses(
                     model, clean_images, timesteps, model_kwargs=dict(y=y, mask=y_mask, data_info=data_info)
                 )
@@ -539,27 +573,27 @@ def train(
                 if accelerator.is_main_process:
                     if config.train.use_fsdp:
                         model_instance.load_state_dict(merged_state_dict)
-                    if validation_noise is not None:
-                        log_validation(
-                            accelerator=accelerator,
-                            config=config,
-                            model=model_instance,
-                            logger=logger,
-                            step=global_step,
-                            device=accelerator.device,
-                            vae=vae,
-                            init_noise=validation_noise,
-                        )
-                    else:
-                        log_validation(
-                            accelerator=accelerator,
-                            config=config,
-                            model=model_instance,
-                            logger=logger,
-                            step=global_step,
-                            device=accelerator.device,
-                            vae=vae,
-                        )
+                    # if validation_noise is not None:
+                    #     log_validation(
+                    #         accelerator=accelerator,
+                    #         config=config,
+                    #         model=model_instance,
+                    #         logger=logger,
+                    #         step=global_step,
+                    #         device=accelerator.device,
+                    #         vae=vae,
+                    #         init_noise=validation_noise,
+                    #     )
+                    # else:
+                    #     log_validation(
+                    #         accelerator=accelerator,
+                    #         config=config,
+                    #         model=model_instance,
+                    #         logger=logger,
+                    #         step=global_step,
+                    #         device=accelerator.device,
+                    #         vae=vae,
+                    #     )
 
             # avoid dead-lock of multiscale data batch sampler
             if (
