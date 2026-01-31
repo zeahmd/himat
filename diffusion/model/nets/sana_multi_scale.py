@@ -65,6 +65,9 @@ class CrossStitchBlock(nn.Module):
 
     def forward(self, x):
         # x shape: (1024, 2240, 3)
+        # save residual
+        residual = x
+
         # left branch
         left_out = self.sep_3x3_1dconv(x) # shape: (1024, out_channels, 3)
         left_gelu_out = self.left_gelu(left_out) # shape: (1024, out_channels, 3)
@@ -79,7 +82,7 @@ class CrossStitchBlock(nn.Module):
         right_out = right_gelu_out # shape: (1024, out_channels, 3)
         
         # combine branches
-        out = left_out + right_out
+        out = left_out + right_out + residual # shape: (1024, out_channels, 3)
         return out
 
 
@@ -185,6 +188,7 @@ class SanaMSBlock(nn.Module):
         # print("mask.shape before cross attn: ", None if mask is None else mask.shape)
 
         ####################### Cross Stitch Block ########################
+        x_before = x.clone()
         # print("Applying Cross Stitch Block...")
         x = x.permute(1, 2, 0)  # (N, C, B)
         # print("x.shape before cross stitch: ", x.shape)
@@ -192,6 +196,8 @@ class SanaMSBlock(nn.Module):
         # print("x.shape after cross stitch: ", x.shape)
         x = x.permute(2, 0, 1) # (B, N, C)
         #print("Applied Cross Stitch Block successfully!")
+        diff = (x - x_before).abs().mean()
+        # print(f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!CrossStitch identity error: {diff:.6f}")
         ###################################################################
 
         x = x + self.cross_attn(x, y, mask)
