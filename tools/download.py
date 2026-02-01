@@ -58,7 +58,11 @@ def find_model(model_name):
             )
         return {"state_dict": state_dict}
     else:
-        return torch.load(model_name, map_location=lambda storage, loc: storage)
+        try: 
+            return torch.load(model_name, map_location=lambda storage, loc: storage)
+        except Exception as e:
+            print(colored(f"[Sana] Error loading model from {model_name}: {e}", "red"))
+            return torch.load(model_name, map_location=lambda storage, loc: storage, weights_only=False)
 
 
 def download_model(model_name):
