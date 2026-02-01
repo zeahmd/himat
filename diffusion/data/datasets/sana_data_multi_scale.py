@@ -224,7 +224,8 @@ class SanaWebDatasetMS(SanaWebDataset):
         # )
         return (
             img,
-            [txt_fea,] * 3,
+            # [txt_fea,] * 3,
+            ["albedo: " + txt_fea, "normal: " + txt_fea, "roughness, metallic, height: " + txt_fea],
             attention_mask.to(torch.int16).unsqueeze(0).repeat(3, 1, 1, 1),
             {'img_hw': data_info["img_hw"].unsqueeze(0).repeat(3, 1), 'aspect_ratio': [data_info["aspect_ratio"]]*3},
             [idx] * 3,
@@ -289,8 +290,9 @@ if __name__ == "__main__":
     image_size = 256
     transform = get_transform("default_train", image_size)
     # data_dir = ["data/debug_data_train/debug_data"]
-    data_dir = ["/home/hpc/vlgm/vlgm116v/MatGen/Sana/data/matsynth"]
+    # data_dir = ["/home/hpc/vlgm/vlgm116v/MatGen/Sana/data/matsynth"]
     # data_dir = ["/home/woody/vlgm/vlgm116v/retadata"]
+    data_dir = ["/home/woody/vlgm/vlgm116v/matsynth/data"]
     for data_path in data_dir:
         train_dataset = SanaWebDatasetMS(
             data_dir=data_path,
@@ -301,19 +303,22 @@ if __name__ == "__main__":
             aspect_ratio_type=str(ASPECT_RATIO_1024),
             load_vae_feat=True,
         )
-        dataloader = DataLoader(train_dataset, batch_size=4, shuffle=False, num_workers=4)
+        dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False, num_workers=4)
+        print(f"Length of dataset: {len(train_dataset)}")
  
         for idx, data in tqdm(enumerate(dataloader)):
             # print(data)
-            print(data[0].shape)
-            print(f"idx: {idx}")
+            # print(data[0].shape)
+            print(data[1])
+            # print(f"idx: {idx}")
             # break
-        print(dataloader.dataset.index_info)
-        dataloader1 = DataLoader(train_dataset, batch_size=1, shuffle=False, num_workers=1)
-        dataloader4 = DataLoader(train_dataset, batch_size=4, shuffle=False, num_workers=1)
-        dataloader1_iter = iter(dataloader1)
-        dataloader4_iter = iter(dataloader4)
-        batch1 = next(dataloader1_iter)
-        batch4 = next(dataloader4_iter)
-        print(f"batch1 img shape: {batch1[0].shape}")
-        print(f"batch4 img shape: {batch4[0].shape}")
+            pass
+        # print(dataloader.dataset.index_info)
+        # dataloader1 = DataLoader(train_dataset, batch_size=1, shuffle=False, num_workers=1)
+        # dataloader4 = DataLoader(train_dataset, batch_size=4, shuffle=False, num_workers=1)
+        # dataloader1_iter = iter(dataloader1)
+        # dataloader4_iter = iter(dataloader4)
+        # batch1 = next(dataloader1_iter)
+        # batch4 = next(dataloader4_iter)
+        # print(f"batch1 img shape: {batch1[0].shape}")
+        # print(f"batch4 img shape: {batch4[0].shape}")

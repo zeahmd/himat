@@ -71,7 +71,8 @@ class CrossStitchBlock(nn.Module):
         # left branch
         left_out = self.sep_3x3_1dconv(x) # shape: (1024, out_channels, 3)
         left_gelu_out = self.left_gelu(left_out) # shape: (1024, out_channels, 3)
-        left_out = left_out * left_gelu_out # shape: (1024, out_channels, 3)
+        # left_out = left_out * left_gelu_out # shape: (1024, out_channels, 3)
+        left_out = x + left_gelu_out # shape: (1024, out_channels, 3)
         left_out = self.left_pointwise_1dconv(left_out) # shape: (1024, out_channels, 3)
 
         # right branch
@@ -510,14 +511,15 @@ class SanaMS(Sana):
                 nn.init.zeros_(self.cfg_embedder.mlp[2].bias)
 
         # Initialize CrossStitchBlock with zeros
-        def _init_cross_stitch_zeros(module):
-            if isinstance(module, nn.Conv1d):
-                nn.init.zeros_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-
-        for block in self.blocks:
-            block.cross_stitch_block.apply(_init_cross_stitch_zeros)
+        print("Initializing CrossStitchBlock weights to zero...")
+        # def _init_cross_stitch_zeros(module):
+        #     if isinstance(module, nn.Conv1d):
+        #         nn.init.zeros_(module.weight)
+        #         if module.bias is not None:
+        #             nn.init.zeros_(module.bias)
+# 
+        # for block in self.blocks:
+        #     block.cross_stitch_block.apply(_init_cross_stitch_zeros)
 
 
 class SanaMSCM(SanaMS):
