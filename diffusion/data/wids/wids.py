@@ -534,6 +534,7 @@ class ShardListDataset(Dataset[T]):
         self.cum_lengths = np.cumsum(self.lengths)
         self.total_length = self.cum_lengths[-1]
 
+        print(f"cache dir: {cache_dir}, localname: {localname}")
         if cache_dir is not None:
             # when a cache dir is explicitly given, we download files into
             # that directory without any changes
@@ -548,6 +549,7 @@ class ShardListDataset(Dataset[T]):
 
             # when no cache dir or localname are given, use the cache from the environment
             self.cache_dir = os.environ.get("WIDS_CACHE", f"~/.cache/_wids_cache")
+            print(f"Using cache directory: {self.cache_dir}")
             self.cache_dir = osp.expanduser(self.cache_dir)
             self.localname = default_localname(self.cache_dir)
 

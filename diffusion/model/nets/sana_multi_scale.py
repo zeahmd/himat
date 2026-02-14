@@ -50,6 +50,43 @@ if _xformers_available:
     import xformers.ops
 
 
+class CrossStitchBlock(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        # left branch
+        self.sep_3x3_1dconv = nn.Conv1d(in_channels=hidden_size, out_channels=hidden_size, kernel_size=3, padding=1, groups=hidden_size)
+        self.left_gelu = nn.GELU(approximate='tanh')
+        self.left_pointwise_1dconv = nn.Conv1d(in_channels=hidden_size, out_channels=hidden_size, kernel_size=1)
+
+        # right branch
+        # no need to define global average pooling layer
+        self.right_pointwise_1dconv = nn.Conv1d(in_channels=hidden_size, out_channels=hidden_size, kernel_size=1)
+        self.right_gelu = nn.GELU(approximate='tanh')
+
+    def forward(self, x):
+        # x shape: (1024, 2240, 3)
+        # save residual
+        residual = x
+
+        # left branch
+        left_out = self.sep_3x3_1dconv(x) # shape: (1024, out_channels, 3)
+        left_gelu_out = self.left_gelu(left_out) # shape: (1024, out_channels, 3)
+        # left_out = left_out * left_gelu_out # shape: (1024, out_channels, 3)
+        left_out = x + left_gelu_out # shape: (1024, out_channels, 3)
+        left_out = self.left_pointwise_1dconv(left_out) # shape: (1024, out_channels, 3)
+
+        # right branch
+        right_out = torch.mean(x, dim=-1, keepdim=True) # shape: (1024, in_channels, 1)
+        right_out = right_out.expand(-1, -1, x.size(-1)) # shape: (1024, in_channels, 3)
+        right_out = self.right_pointwise_1dconv(right_out) # shape: (1024, out_channels, 3)
+        right_gelu_out = self.right_gelu(right_out) # shape: (1024, out_channels, 3)
+        right_out = right_gelu_out # shape: (1024, out_channels, 3)
+        
+        # combine branches
+        out = left_out + right_out + residual # shape: (1024, out_channels, 3)
+        return out
+
+
 class SanaMSBlock(nn.Module):
     """
     A Sana block with global shared adaptive layer norm zero (adaLN-Zero) conditioning.
@@ -72,6 +109,7 @@ class SanaMSBlock(nn.Module):
     ):
         super().__init__()
         self.hidden_size = hidden_size
+        # print(f"Initaliing SANAMSBlock with self.hidden_size: {self.hidden_size}")
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         if attn_type == "flash":
             # flash self attention
@@ -130,18 +168,39 @@ class SanaMSBlock(nn.Module):
         else:
             self.mlp = None
 
+        self.cross_stitch_block = CrossStitchBlock(hidden_size=hidden_size)
+
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.scale_shift_table = nn.Parameter(torch.randn(6, hidden_size) / hidden_size**0.5)
 
     def forward(self, x, y, t, mask=None, HW=None, image_rotary_emb=None, **kwargs):
         B, N, C = x.shape
 
+        # print("x.shape at block start: ", x.shape)
+        # print("HW: ", HW)
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             self.scale_shift_table[None] + t.reshape(B, 6, -1)
         ).chunk(6, dim=1)
         x = x + self.drop_path(
             gate_msa * self.attn(t2i_modulate(self.norm1(x), shift_msa, scale_msa), HW=HW, rotary_emb=image_rotary_emb)
         )
+        # print("x.shape before cross attn: ", x.shape)
+        # print("y.shape before cross attn: ", y.shape)
+        # print("mask.shape before cross attn: ", None if mask is None else mask.shape)
+
+        ####################### Cross Stitch Block ########################
+        x_before = x.clone()
+        # print("Applying Cross Stitch Block...")
+        x = x.permute(1, 2, 0)  # (N, C, B)
+        # print("x.shape before cross stitch: ", x.shape)
+        x = self.cross_stitch_block(x)
+        # print("x.shape after cross stitch: ", x.shape)
+        x = x.permute(2, 0, 1) # (B, N, C)
+        #print("Applied Cross Stitch Block successfully!")
+        diff = (x - x_before).abs().mean()
+        # print(f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!CrossStitch identity error: {diff:.6f}")
+        ###################################################################
+
         x = x + self.cross_attn(x, y, mask)
         x = x + self.drop_path(gate_mlp * self.mlp(t2i_modulate(self.norm2(x), shift_mlp, scale_mlp), HW=HW))
 
@@ -325,6 +384,7 @@ class SanaMS(Sana):
         else:
             timestep = timestep.long().to(torch.float32)
         y = y.to(self.dtype)
+        # print("y.shape in SanaMS forward: ", y.shape)
         self.h, self.w = x.shape[-2] // self.patch_size, x.shape[-1] // self.patch_size
         x = self.x_embedder(x)
         image_pos_embed = None
@@ -337,7 +397,9 @@ class SanaMS(Sana):
             t += cfg_embed
 
         t0 = self.t_block(t)
+        # print("y.shape before y_embedder: ", y.shape)
         y = self.y_embedder(y, self.training, mask=mask)  # (N, D)
+        # print("y.shape after y_embedder: ", y.shape)
         if self.y_norm:
             y = self.attention_y_norm(y)
 
@@ -346,17 +408,22 @@ class SanaMS(Sana):
             mask = mask.repeat(y.shape[0] // mask.shape[0], 1) if mask.shape[0] != y.shape[0] else mask
             mask = mask.squeeze(1).squeeze(1)
             if _xformers_available:
+                # print("y.shape before masked_select: ", y.shape)
                 y = y.squeeze(1).masked_select(mask.unsqueeze(-1) != 0).view(1, -1, x.shape[-1])
+                # print("y.shape after masked_select: ", y.shape)
                 y_lens = mask.sum(dim=1).tolist()
             else:
                 y_lens = mask
         elif _xformers_available:
             y_lens = [y.shape[2]] * y.shape[0]
+            # print("y.shape before squeeze: ", y.shape)
             y = y.squeeze(1).view(1, -1, x.shape[-1])
+            # print("y.shape after squeeze: ", y.shape)
         else:
             raise ValueError(f"Attention type is not available due to _xformers_available={_xformers_available}.")
 
         for block in self.blocks:
+            # print("y.shape in SanaMS forward loop: ", y.shape)
             if jvp:
                 x = block(x, y, t0, y_lens, (self.h, self.w), image_pos_embed, **kwargs)
             # gradient checkpointing is not supported for JVP
@@ -442,6 +509,17 @@ class SanaMS(Sana):
             nn.init.zeros_(self.cfg_embedder.mlp[2].weight)
             if hasattr(self.cfg_embedder.mlp[2], "bias") and self.cfg_embedder.mlp[2].bias is not None:
                 nn.init.zeros_(self.cfg_embedder.mlp[2].bias)
+
+        # Initialize CrossStitchBlock with zeros
+        print("Initializing CrossStitchBlock weights to zero...")
+        # def _init_cross_stitch_zeros(module):
+        #     if isinstance(module, nn.Conv1d):
+        #         nn.init.zeros_(module.weight)
+        #         if module.bias is not None:
+        #             nn.init.zeros_(module.bias)
+# 
+        # for block in self.blocks:
+        #     block.cross_stitch_block.apply(_init_cross_stitch_zeros)
 
 
 class SanaMSCM(SanaMS):

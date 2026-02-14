@@ -11,7 +11,7 @@ data:
   clip_thr_temperature: 0.1
   clip_thr: 25.0
   load_text_feat: false
-  load_vae_feat: false
+  load_vae_feat: true
   transform: default_train
   type: SanaWebDatasetMS
   sort_dataset: false
@@ -21,7 +21,7 @@ model:
   image_size: 1024
   mixed_precision: fp16
   fp32_attention: true
-  load_from:
+  load_from: /home/hpc/vlgm/vlgm116v/.cache/huggingface/hub/models--Efficient-Large-Model--Sana_600M_1024px/snapshots/fe624a9b87d8683fa1f1fe7238c5fc9c30e97291/checkpoints/Sana_600M_1024px_MultiLing.pth
   resume_from:
   aspect_ratio_type: ASPECT_RATIO_1024
   multi_scale: true
@@ -38,7 +38,7 @@ model:
 # VAE setting
 vae:
   vae_type: AutoencoderDC
-  vae_pretrained: mit-han-lab/dc-ae-f32c32-sana-1.1-diffusers
+  vae_pretrained: /home/hpc/vlgm/vlgm116v/.cache/huggingface/hub/models--mit-han-lab--dc-ae-f32c32-sana-1.1-diffusers/snapshots/6f7b3f3b289a439a11ef4fb1034989fd4b9a4766
   scale_factor: 0.41407
   vae_latent_dim: 32
   vae_downsample_rate: 32
@@ -74,7 +74,7 @@ scheduler:
 train:
   num_workers: 10
   seed: 1
-  train_batch_size: 64
+  train_batch_size: 1
   num_epochs: 100
   gradient_accumulation_steps: 1
   grad_checkpointing: true

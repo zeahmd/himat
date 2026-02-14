@@ -35,7 +35,7 @@ from diffusion.data.transforms import get_closest_ratio
 from diffusion.data.wids import lru_json_load
 
 
-# @DATASETS.register_module()
+@DATASETS.register_module()
 class SanaWebDatasetMS(SanaWebDataset):
     def __init__(
         self,
@@ -213,21 +213,36 @@ class SanaWebDatasetMS(SanaWebDataset):
                     [attention_mask, torch.zeros(1, 1, self.max_length - attention_mask.shape[-1])], dim=-1
                 )
 
+        # return (
+        #     img,
+        #     txt_fea,
+        #     attention_mask.to(torch.int16),
+        #     data_info,
+        #     idx,
+        #     caption_type,
+        #     dataindex_info,
+        # )
         return (
             img,
-            txt_fea,
-            attention_mask.to(torch.int16),
-            data_info,
-            idx,
-            caption_type,
-            dataindex_info,
+            # [txt_fea,] * 3,
+            ["albedo: " + txt_fea, "normal: " + txt_fea, "roughness, metallic, height: " + txt_fea],
+            attention_mask.to(torch.int16).unsqueeze(0).repeat(3, 1, 1, 1),
+            {'img_hw': data_info["img_hw"].unsqueeze(0).repeat(3, 1), 'aspect_ratio': [data_info["aspect_ratio"]]*3},
+            [idx] * 3,
+            [caption_type, caption_type, caption_type],
+            {
+                'key': [dataindex_info["key"]]*3,
+                'index': [dataindex_info["index"]] * 3,
+                'shard': [dataindex_info["shard"]]*3,
+                'shardindex': [dataindex_info["shardindex"]] * 3,
+            }
         )
 
     def __len__(self):
         return len(self.dataset)
 
 
-# @DATASETS.register_module()
+@DATASETS.register_module()
 class DummyDatasetMS(SanaWebDatasetMS):
     def __init__(self, **kwargs):
         self.base_size = kwargs["resolution"]
@@ -275,8 +290,9 @@ if __name__ == "__main__":
     image_size = 256
     transform = get_transform("default_train", image_size)
     # data_dir = ["data/debug_data_train/debug_data"]
-    # data_dir = ["/home/hpc/vlgm/vlgm116v/MatGen/Sana/data/retadata"]
-    data_dir = ["/home/woody/vlgm/vlgm116v/retadata"]
+    # data_dir = ["/home/hpc/vlgm/vlgm116v/MatGen/Sana/data/matsynth"]
+    # data_dir = ["/home/woody/vlgm/vlgm116v/retadata"]
+    data_dir = ["/home/woody/vlgm/vlgm116v/matsynth/data"]
     for data_path in data_dir:
         train_dataset = SanaWebDatasetMS(
             data_dir=data_path,
@@ -285,11 +301,24 @@ if __name__ == "__main__":
             max_length=300,
             num_replicas=1,
             aspect_ratio_type=str(ASPECT_RATIO_1024),
-            load_vae_feat=False,
+            load_vae_feat=True,
         )
         dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False, num_workers=4)
-
-        for data in tqdm(dataloader):
-            print(data)
-            break
+        print(f"Length of dataset: {len(train_dataset)}")
+ 
+        for idx, data in tqdm(enumerate(dataloader)):
+            # print(data)
+            # print(data[0].shape)
+            print(data[1])
+            # print(f"idx: {idx}")
+            # break
+            pass
         # print(dataloader.dataset.index_info)
+        # dataloader1 = DataLoader(train_dataset, batch_size=1, shuffle=False, num_workers=1)
+        # dataloader4 = DataLoader(train_dataset, batch_size=4, shuffle=False, num_workers=1)
+        # dataloader1_iter = iter(dataloader1)
+        # dataloader4_iter = iter(dataloader4)
+        # batch1 = next(dataloader1_iter)
+        # batch4 = next(dataloader4_iter)
+        # print(f"batch1 img shape: {batch1[0].shape}")
+        # print(f"batch4 img shape: {batch4[0].shape}")

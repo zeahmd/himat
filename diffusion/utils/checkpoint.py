@@ -119,15 +119,25 @@ def save_checkpoint_ddp(
 
     logger = get_root_logger()
     torch.save(state_dict, file_path)
+    print(f"Saved checkpoint at {file_path}")
+    print(f"Saved checkpoint of epoch {epoch} to {file_path.format(epoch)}.")
     logger.info(f"Saved checkpoint of epoch {epoch} to {file_path.format(epoch)}.")
     if keep_last:
-        for i in range(epoch):
-            previous_ckgt = file_path.format(i)
-            if os.path.exists(previous_ckgt):
-                os.remove(previous_ckgt)
+        # for i in range(epoch):
+        #     print(f"Removing checkpoint of epoch {i}")
+        #     previous_ckgt = file_path.format(i)
+        #     if os.path.exists(previous_ckgt):
+        #         print(f"Removing previous checkpoint at {previous_ckgt}")
+        #         os.remove(previous_ckgt)
+        import glob
+        for old_ckpt in sorted(glob.glob(os.path.join(work_dir, "epoch_*.pth"))):
+            if old_ckpt != file_path:
+                print(f"Removing old checkpoint at {old_ckpt}")
+                os.remove(old_ckpt)
     if add_symlink:
         link_path = os.path.join(os.path.dirname(file_path), "latest.pth")
         if os.path.exists(link_path) or os.path.islink(link_path):
+            print(f"Removing existing symlink at {link_path}")
             os.remove(link_path)
         os.symlink(os.path.abspath(file_path), link_path)
 

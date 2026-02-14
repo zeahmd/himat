@@ -55,6 +55,25 @@ from diffusion.utils.optimizer import auto_scale_lr, build_optimizer
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
+def squeeze_batch(batch):
+    batch[0] = batch[0].squeeze(0)
+    batch[1] = tuple(x[0] for x in batch[1])
+    batch[2] = batch[2].squeeze(0)
+    batch[3] = {
+        "img_hw": batch[3]["img_hw"].squeeze(0),
+        "aspect_ratio": torch.tensor([x for x in batch[3]["aspect_ratio"]], device=batch[0].device),
+    }
+    batch[4] = torch.tensor([x for x in batch[4]], device=batch[0].device)
+    batch[5] = tuple(x[0] for x in batch[5])
+    batch[6] = {
+        'key': [x for x in batch[6]['key']],
+        'index': torch.tensor([x for x in batch[6]['index']], device=batch[0].device),
+        'shard': [x for x in batch[6]['shard']],
+        'shardindex': torch.tensor([x for x in batch[6]['shardindex']], device=batch[0].device),
+    }
+    return batch
+
+
 def set_fsdp_env():
     # Basic FSDP settings
     os.environ["ACCELERATE_USE_FSDP"] = "true"
@@ -93,15 +112,187 @@ def ema_update(model_dest, model_src, rate):
         p_dest.data.mul_(rate).add_((1 - rate) * p_src.data)
 
 
+####################################### Original Code #############################################
+# @torch.inference_mode()
+# def log_validation(accelerator, config, model, logger, step, device, vae=None, init_noise=None):
+#     torch.cuda.empty_cache()
+#     vis_sampler = config.scheduler.vis_sampler
+#     model = accelerator.unwrap_model(model).eval()
+#     hw = torch.tensor([[image_size, image_size]], dtype=torch.float, device=device).repeat(1, 1)
+#     ar = torch.tensor([[1.0]], device=device).repeat(1, 1)
+#     null_y = torch.load(null_embed_path, map_location="cpu")
+#     null_y = null_y["uncond_prompt_embeds"].to(device)
+# 
+#     # Create sampling noise:
+#     logger.info("Running validation... ")
+#     image_logs = []
+# 
+#     def run_sampling(init_z=None, label_suffix="", vae=None, sampler="dpm-solver"):
+#         latents = []
+#         current_image_logs = []
+#         for prompt in validation_prompts:
+#             z = (
+#                 torch.randn(1, config.vae.vae_latent_dim, latent_size, latent_size, device=device)
+#                 if init_z is None
+#                 else init_z
+#             )
+#             embed = torch.load(
+#                 osp.join(config.train.valid_prompt_embed_root, f"{prompt[:50]}_{valid_prompt_embed_suffix}"),
+#                 map_location="cpu",
+#             )
+#             caption_embs, emb_masks = embed["caption_embeds"].to(device), embed["emb_mask"].to(device)
+#             model_kwargs = dict(data_info={"img_hw": hw, "aspect_ratio": ar}, mask=emb_masks)
+# 
+#             print("z.shape: ", z.shape)
+#             if sampler == "dpm-solver":
+#                 dpm_solver = DPMS(
+#                     model.forward_with_dpmsolver,
+#                     condition=caption_embs,
+#                     uncondition=null_y,
+#                     cfg_scale=4.5,
+#                     model_kwargs=model_kwargs,
+#                 )
+#                 denoised = dpm_solver.sample(
+#                     z,
+#                     steps=14,
+#                     order=2,
+#                     skip_type="time_uniform",
+#                     method="multistep",
+#                 )
+#             elif sampler == "flow_euler":
+#                 flow_solver = FlowEuler(
+#                     model, condition=caption_embs, uncondition=null_y, cfg_scale=4.5, model_kwargs=model_kwargs
+#                 )
+#                 denoised = flow_solver.sample(z, steps=28)
+#             elif sampler == "flow_dpm-solver":
+#                 dpm_solver = DPMS(
+#                     model.forward_with_dpmsolver,
+#                     condition=caption_embs,
+#                     uncondition=null_y,
+#                     cfg_scale=4.5,
+#                     model_type="flow",
+#                     model_kwargs=model_kwargs,
+#                     schedule="FLOW",
+#                 )
+#                 denoised = dpm_solver.sample(
+#                     z,
+#                     steps=20,
+#                     order=2,
+#                     skip_type="time_uniform_flow",
+#                     method="multistep",
+#                     flow_shift=config.scheduler.flow_shift,
+#                 )
+#                 print("denoised.shape: ", denoised.shape)
+#             else:
+#                 raise ValueError(f"{sampler} not implemented")
+# 
+#             latents.append(denoised)
+#         torch.cuda.empty_cache()
+#         if vae is None:
+#             vae = get_vae(config.vae.vae_type, config.vae.vae_pretrained, accelerator.device).to(vae_dtype)
+#         for prompt, latent in zip(validation_prompts, latents):
+#             latent = latent.to(vae_dtype)
+#             samples = vae_decode(config.vae.vae_type, vae, latent)
+#             samples = (
+#                 torch.clamp(127.5 * samples + 128.0, 0, 255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()[0]
+#             )
+#             image = Image.fromarray(samples)
+#             current_image_logs.append({"validation_prompt": prompt + label_suffix, "images": [image]})
+# 
+#         return current_image_logs
+# 
+#     # First run with original noise
+#     image_logs += run_sampling(init_z=None, label_suffix="", vae=vae, sampler=vis_sampler)
+# 
+#     # Second run with init_noise if provided
+#     if init_noise is not None:
+#         torch.cuda.empty_cache()
+#         gc.collect()
+#         init_noise = torch.clone(init_noise).to(device)
+#         image_logs += run_sampling(init_z=init_noise, label_suffix=" w/ init noise", vae=vae, sampler=vis_sampler)
+# 
+#     formatted_images = []
+#     for log in image_logs:
+#         images = log["images"]
+#         validation_prompt = log["validation_prompt"]
+#         for image in images:
+#             formatted_images.append((validation_prompt, np.asarray(image)))
+# 
+#     for tracker in accelerator.trackers:
+#         if tracker.name == "tensorboard":
+#             for validation_prompt, image in formatted_images:
+#                 tracker.writer.add_images(validation_prompt, image[None, ...], step, dataformats="NHWC")
+#         elif tracker.name == "wandb":
+#             import wandb
+# 
+#             wandb_images = []
+#             for validation_prompt, image in formatted_images:
+#                 wandb_images.append(wandb.Image(image, caption=validation_prompt, file_type="jpg"))
+#             tracker.log({"validation": wandb_images})
+#         else:
+#             logger.warn(f"image logging not implemented for {tracker.name}")
+# 
+#     def concatenate_images(image_caption, images_per_row=5, image_format="webp"):
+#         import io
+# 
+#         images = [log["images"][0] for log in image_caption]
+#         if images[0].size[0] > 1024:
+#             images = [image.resize((1024, 1024)) for image in images]
+# 
+#         widths, heights = zip(*(img.size for img in images))
+#         max_width = max(widths)
+#         total_height = sum(heights[i : i + images_per_row][0] for i in range(0, len(images), images_per_row))
+# 
+#         new_im = Image.new("RGB", (max_width * images_per_row, total_height))
+# 
+#         y_offset = 0
+#         for i in range(0, len(images), images_per_row):
+#             row_images = images[i : i + images_per_row]
+#             x_offset = 0
+#             for img in row_images:
+#                 new_im.paste(img, (x_offset, y_offset))
+#                 x_offset += max_width
+#             y_offset += heights[i]
+#         webp_image_bytes = io.BytesIO()
+#         new_im.save(webp_image_bytes, format=image_format)
+#         webp_image_bytes.seek(0)
+#         new_im = Image.open(webp_image_bytes)
+# 
+#         return new_im
+# 
+#     if config.train.local_save_vis:
+#         file_format = "webp"
+#         local_vis_save_path = osp.join(config.work_dir, "log_vis")
+#         os.umask(0o000)
+#         os.makedirs(local_vis_save_path, exist_ok=True)
+#         concatenated_image = concatenate_images(image_logs, images_per_row=5, image_format=file_format)
+#         save_path = (
+#             osp.join(local_vis_save_path, f"vis_{step}.{file_format}")
+#             if init_noise is None
+#             else osp.join(local_vis_save_path, f"vis_{step}_w_init.{file_format}")
+#         )
+#         concatenated_image.save(save_path)
+# 
+#     model.train()
+#     del vae
+#     flush()
+#     return image_logs
+#####################################################################################################
+
 @torch.inference_mode()
 def log_validation(accelerator, config, model, logger, step, device, vae=None, init_noise=None):
     torch.cuda.empty_cache()
     vis_sampler = config.scheduler.vis_sampler
     model = accelerator.unwrap_model(model).eval()
-    hw = torch.tensor([[image_size, image_size]], dtype=torch.float, device=device).repeat(1, 1)
-    ar = torch.tensor([[1.0]], device=device).repeat(1, 1)
+    ############################## CHANGED HERE ##############################
+    hw = torch.tensor([[image_size, image_size]], dtype=torch.float, device=device).repeat(3, 1)
+    ar = torch.tensor([[1.0]], device=device).repeat(3, 1)
+    ##########################################################################
     null_y = torch.load(null_embed_path, map_location="cpu")
+    ############################## CHANGED HERE ##############################
     null_y = null_y["uncond_prompt_embeds"].to(device)
+    null_y = null_y.repeat(3, 1, 1)
+    ###########################################################################
 
     # Create sampling noise:
     logger.info("Running validation... ")
@@ -111,18 +302,25 @@ def log_validation(accelerator, config, model, logger, step, device, vae=None, i
         latents = []
         current_image_logs = []
         for prompt in validation_prompts:
+            ################################ CHANGED HERE ##############################
             z = (
-                torch.randn(1, config.vae.vae_latent_dim, latent_size, latent_size, device=device)
+                torch.randn(3, config.vae.vae_latent_dim, latent_size, latent_size, device=device)
                 if init_z is None
                 else init_z
             )
+            ###########################################################################
             embed = torch.load(
                 osp.join(config.train.valid_prompt_embed_root, f"{prompt[:50]}_{valid_prompt_embed_suffix}"),
                 map_location="cpu",
             )
             caption_embs, emb_masks = embed["caption_embeds"].to(device), embed["emb_mask"].to(device)
+            ############################### CHANGED HERE ##############################
+            caption_embs = caption_embs.repeat(3, 1, 1)
+            emb_masks = emb_masks.repeat(3, 1)
+            ###########################################################################
             model_kwargs = dict(data_info={"img_hw": hw, "aspect_ratio": ar}, mask=emb_masks)
 
+            print("z.shape: ", z.shape)
             if sampler == "dpm-solver":
                 dpm_solver = DPMS(
                     model.forward_with_dpmsolver,
@@ -161,21 +359,34 @@ def log_validation(accelerator, config, model, logger, step, device, vae=None, i
                     method="multistep",
                     flow_shift=config.scheduler.flow_shift,
                 )
+                print("denoised.shape: ", denoised.shape)
             else:
                 raise ValueError(f"{sampler} not implemented")
 
             latents.append(denoised)
         torch.cuda.empty_cache()
+        gc.collect()
         if vae is None:
-            vae = get_vae(config.vae.vae_type, config.vae.vae_pretrained, accelerator.device).to(vae_dtype)
+            # vae = get_vae(config.vae.vae_type, config.vae.vae_pretrained, accelerator.device).to(vae_dtype)
+            vae = get_vae(config.vae.vae_type, config.vae.vae_pretrained, "cpu").to(vae_dtype)
+        print("Doing VAE decoding on CPU to avoid OOM...")
+        now = time.time()
         for prompt, latent in zip(validation_prompts, latents):
             latent = latent.to(vae_dtype)
+            latent = latent.to("cpu")
             samples = vae_decode(config.vae.vae_type, vae, latent)
             samples = (
-                torch.clamp(127.5 * samples + 128.0, 0, 255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()[0]
+                torch.clamp(127.5 * samples + 128.0, 0, 255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()
             )
-            image = Image.fromarray(samples)
-            current_image_logs.append({"validation_prompt": prompt + label_suffix, "images": [image]})
+            ############################# CHANGED HERE ##############################
+            basecolor = Image.fromarray(samples[0])
+            current_image_logs.append({"validation_prompt": "basecolor" + prompt + label_suffix, "images": [basecolor]})
+            normal = Image.fromarray(samples[1])
+            current_image_logs.append({"validation_prompt": "normal" + prompt + label_suffix, "images": [normal]})
+            rmh = Image.fromarray(samples[2])
+            current_image_logs.append({"validation_prompt": "rmh" + prompt + label_suffix, "images": [rmh]})
+            ##########################################################################
+        print("VAE decoding time (minutes): ", (time.time() - now) / 60.0)
 
         return current_image_logs
 
@@ -183,11 +394,11 @@ def log_validation(accelerator, config, model, logger, step, device, vae=None, i
     image_logs += run_sampling(init_z=None, label_suffix="", vae=vae, sampler=vis_sampler)
 
     # Second run with init_noise if provided
-    if init_noise is not None:
-        torch.cuda.empty_cache()
-        gc.collect()
-        init_noise = torch.clone(init_noise).to(device)
-        image_logs += run_sampling(init_z=init_noise, label_suffix=" w/ init noise", vae=vae, sampler=vis_sampler)
+    # if init_noise is not None:
+    #     torch.cuda.empty_cache()
+    #     gc.collect()
+    #     init_noise = torch.clone(init_noise).to(device)
+    #     image_logs += run_sampling(init_z=init_noise, label_suffix=" w/ init noise", vae=vae, sampler=vis_sampler)
 
     formatted_images = []
     for log in image_logs:
@@ -323,12 +534,26 @@ def train(
         lm_time_all = 0
         vae_time_all = 0
         model_time_all = 0
+        print(f"Length of train_dataloader: {len(train_dataloader)}")
+        batch_count = 0
         for step, batch in enumerate(train_dataloader):
+            batch_count += 1
+            # batch[0] = batch[0].squeeze(0)[1]
+            # batch[0] = batch[0][:, 1, :, :, :] # use normal map only
             # image, json_info, key = batch
+            batch = squeeze_batch(batch) # Please use this line for HiMat
+            # print("batch[0].shape: ", batch[0].shape)
+            # print("batch[1]: ", batch[1])
+            # print("batch[2].shape: ", batch[2].shape)
+            # print("batch[3]: ", batch[3])
+            # print("batch[4]: ", batch[4])
+            # print("batch[5]: ", batch[5])
+            # print("batch[6]: ", batch[6])
             accelerator.wait_for_everyone()
             data_time_all += time.time() - data_time_start
             vae_time_start = time.time()
             if load_vae_feat:
+                # TODO: remove first dimension 
                 z = batch[0].to(accelerator.device)
             else:
                 with torch.no_grad():
@@ -366,6 +591,7 @@ def train(
                             max_length_all = (
                                 num_sys_prompt_tokens + config.text_encoder.model_max_length - 2
                             )  # magic number 2: [bos], [_]
+                        # print("len(prompt): ", len(prompt))
                         txt_tokens = tokenizer(
                             prompt,
                             padding="max_length",
@@ -376,9 +602,11 @@ def train(
                         select_index = [0] + list(
                             range(-config.text_encoder.model_max_length + 1, 0)
                         )  # first bos and end N-1
+                        # print("txt_tokens.input_ids.shape: ", txt_tokens.input_ids.shape)
                         y = text_encoder(txt_tokens.input_ids, attention_mask=txt_tokens.attention_mask)[0][:, None][
                             :, :, select_index
                         ]
+                        # print("y.shape: ", y.shape)
                         y_mask = txt_tokens.attention_mask[:, None, None][:, :, :, select_index]
                 else:
                     print("error")
@@ -406,6 +634,7 @@ def train(
             with accelerator.accumulate(model):
                 # Predict the noise residual
                 optimizer.zero_grad()
+                # print(f"clean_images.shape: {clean_images.shape}")
                 loss_term = train_diffusion.training_losses(
                     model, clean_images, timesteps, model_kwargs=dict(y=y, mask=y_mask, data_info=data_info)
                 )
@@ -501,6 +730,7 @@ def train(
                         optimizer=optimizer,
                         lr_scheduler=lr_scheduler,
                         step=global_step,
+                        keep_last=True,
                         add_symlink=True,
                     )
                 else:
@@ -516,6 +746,7 @@ def train(
                             lr_scheduler=lr_scheduler,
                             step=global_step,
                             generator=generator,
+                            keep_last=True,
                             add_symlink=True,
                         )
 
@@ -575,6 +806,8 @@ def train(
 
             data_time_start = time.time()
 
+        print(f"Epoch {epoch} finished, total batches: {batch_count}")
+
         if epoch % config.train.save_model_epochs == 0 or epoch == config.train.num_epochs and not config.debug:
             accelerator.wait_for_everyone()
             torch.cuda.synchronize()
@@ -591,6 +824,7 @@ def train(
                     optimizer=optimizer,
                     lr_scheduler=lr_scheduler,
                     step=global_step,
+                    keep_last=True,
                     add_symlink=True,
                 )
             else:
@@ -606,6 +840,7 @@ def train(
                         optimizer=optimizer,
                         lr_scheduler=lr_scheduler,
                         generator=generator,
+                        keep_last=True,
                         add_symlink=True,
                     )
 
@@ -844,6 +1079,11 @@ def main(cfg: SanaConfig) -> None:
         null_embed_path=null_embed_path,
         **model_kwargs,
     ).train()
+    # find all parameters of cross-stitch block and check whether they are trainable and also zero
+    print("<----------------------------------- Checking cross-stitch parameters... ----------------------------------->")
+    for name, param in model.named_parameters():
+        if "cross_stitch" in name:
+            logger.info(f"Cross-stitch parameter: {name}, requires_grad: {param.requires_grad}, sum: {param.sum().item()}")
 
     if (not config.train.use_fsdp) and config.train.ema_update:
         model_ema = deepcopy(model).eval()
