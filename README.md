@@ -1,4 +1,5 @@
 **HiMat: DiT-based Ultra-High Resolution SVBRDF Generation**
+arxiv: [https://arxiv.org/abs/2508.07011](https://arxiv.org/abs/2508.07011)
 
 | Text Prompt | Rendering | Basecolor | Normal | Roughness | Metallic | Height |
 | --- | --- | --- | --- | --- | --- | --- |
