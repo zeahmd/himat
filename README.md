@@ -12,9 +12,6 @@ First create a conda environment, activate it, install ninja, and verify the ins
 conda create -n <env_name> python=3.10.0 -y
 conda activate <env_name>
 pip install ninja
-```
-Next, verify the ninja installation:
-```
 ninja --version
 echo $? (should return exit code 0)
 ```
@@ -27,7 +24,7 @@ Once the ninja is successfully installed, run the following command to install e
 bash environment_setup.sh
 ```
 
-There can be problems with flash-attn installation, in that case please refer to the flash-attn [Github](https://github.com/Dao-AILab/flash-attention). Moreover, do not forget to check the issues section.
+There can be problems with flash-attn installation, in that case please refer to the flash-attn [Github](https://github.com/Dao-AILab/flash-attention). Moreover, do not forget to check the issues section especially this [one](https://github.com/Dao-AILab/flash-attention/issues/1038#issuecomment-2439430999).
 
 ## MatSynth Preprocessing
 
